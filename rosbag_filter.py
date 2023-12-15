@@ -1,3 +1,16 @@
+#!/usr/bin/env python3
+
+"""
+TODO:
+- Ideal payload runtimes
+- Add linear velocity topic and use to check stops with gps points
+- Ideal boom position
+- plot robot path
+- plot stops
+- plot assists
+- plot 
+"""
+
 import rosbag
 import pandas as pd
 import json

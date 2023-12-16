@@ -9,6 +9,7 @@ class JSONProcessor:
     COLOR_TURNS = 'yellow'
     COLOR_START_PATH = 'blue'
     COLOR_END_PATH = 'red'
+    COLOR_DATUM = 'black'
 
     def __init__(self, json_file_path):
         with open(json_file_path, "r") as json_file:
@@ -28,8 +29,8 @@ class JSONProcessor:
     def extract_rows(self):
         rows = [
             {
-                'x': point['head']['position']['x'] + self.json_data['datum']['longitude'],
-                'y': point['head']['position']['y'] + self.json_data['datum']['latitude']
+                'x': (point['head']['position']['x'])/111319 + self.json_data['datum']['longitude'],
+                'y': (point['head']['position']['y'])/111319 + self.json_data['datum']['latitude']
             }
             for point in self.json_data['points'] if point.get('treatment_area', False)
         ]
@@ -41,8 +42,8 @@ class JSONProcessor:
 
         turns = [
             {
-                'x': point['head']['position']['x'] + self.json_data['datum']['longitude'],
-                'y': point['head']['position']['y'] + self.json_data['datum']['latitude']
+                'x': (point['head']['position']['x'])/111319 + self.json_data['datum']['longitude'],
+                'y': (point['head']['position']['y'])/111319 + self.json_data['datum']['latitude']
             }
             for i in range(1, len(treatment_area_indices))
             for point in self.json_data['points'][treatment_area_indices[i - 1] + 1: treatment_area_indices[i]]
@@ -54,8 +55,8 @@ class JSONProcessor:
         first_treatment_area_index = next((i for i, point in enumerate(self.json_data['points']) if point.get('treatment_area', False)), None)
 
         start_path = {
-            'x': [point['head']['position']['x'] + self.json_data['datum']['longitude'] for point in self.json_data['points'][:first_treatment_area_index + 1]],
-            'y': [point['head']['position']['y'] + self.json_data['datum']['latitude'] for point in self.json_data['points'][:first_treatment_area_index + 1]]
+            'x': [(point['head']['position']['x'])/111319 + self.json_data['datum']['longitude'] for point in self.json_data['points'][:first_treatment_area_index + 1]],
+            'y': [(point['head']['position']['y'])/111319 + self.json_data['datum']['latitude'] for point in self.json_data['points'][:first_treatment_area_index + 1]]
         }
 
         return pd.DataFrame(start_path)
@@ -65,11 +66,34 @@ class JSONProcessor:
         last_treatment_area_index = next((i for i in range(last_point_index, -1, -1) if self.json_data['points'][i].get('treatment_area', False)), None)
 
         end_path = {
-            'x': [point['head']['position']['x'] + self.json_data['datum']['longitude'] for point in self.json_data['points'][last_treatment_area_index + 1:]],
-            'y': [point['head']['position']['y'] + self.json_data['datum']['latitude'] for point in self.json_data['points'][last_treatment_area_index + 1:]]
+            'x': [(point['head']['position']['x'])/111319 + self.json_data['datum']['longitude'] for point in self.json_data['points'][last_treatment_area_index + 1:]],
+            'y': [(point['head']['position']['y'])/111319 + self.json_data['datum']['latitude'] for point in self.json_data['points'][last_treatment_area_index + 1:]]
         }
 
         return pd.DataFrame(end_path)
+    
+    def extract_datum(self):
+        datum  = [
+            {
+                'x': self.json_data['datum']['longitude'],
+                'y': self.json_data['datum']['latitude']
+            }
+        ]
+
+        return pd.DataFrame(datum)
+    
+    def extract_wing_boom_pos(self):
+        wing_boom_points = [
+            {
+                'x': (point['point']['position']['x'])/111319 + self.json_data['datum']['longitude'],
+                'y': (point['point']['position']['y'])/111319 + self.json_data['datum']['latitude'],
+                'boom_pos': point['boom_position'],
+                'left_wing_pos': point['left_wing_position'],
+                'right_wing_pos': point['right_wing_position']
+            }
+            for point in self.json_data['wing_boom_position']
+        ]
+        return pd.DataFrame(wing_boom_points)
 
     def plot_points(self, df, color, label):
         plt.scatter(df['x'], df['y'], c=color, label=label)
@@ -78,17 +102,9 @@ class JSONProcessor:
         # Plotting all DataFrames in one plot
         fig, ax = plt.subplots(figsize=(8, 8))
 
-        for df, color, label in zip(dataframes, [self.COLOR_ROWS, self.COLOR_TURNS, self.COLOR_START_PATH, self.COLOR_END_PATH], ['Rows', 'Turns', 'Start Path', 'End Path']):
+        for df, color, label in zip(dataframes, [self.COLOR_ROWS, self.COLOR_TURNS, self.COLOR_START_PATH, self.COLOR_END_PATH, self.COLOR_DATUM], ['Rows', 'Turns', 'Start Path', 'End Path', 'Datum']):
             if df is not None:
                 ax.scatter(df['x'], df['y'], c=color, label=label)
-
-        ax.set_title('Combined Plot of DataFrames')
-        ax.set_xlabel('X-axis')
-        ax.set_ylabel('Y-axis')
-        ax.legend()
-
-        # Show the plot
-        plt.show()
 
 class ROSBagProcessor:
     def __init__(self, bag_path, topics):
@@ -126,8 +142,12 @@ class ROSBagProcessor:
 
         df = pd.DataFrame(data)
         return df
-    
 
+    def plot_positions(self):
+        df = self.create_dataframe()
+        plt.scatter(df['longitude'], df['latitude'], c='blue', label='GPS Positions', marker='_', s=5)
+        
+    
 class DataLogger:
     def __init__(self, json_processor, rosbag_processor, rows, turns, start_path, end_path):
         self.json_processor = json_processor
@@ -183,7 +203,7 @@ class DataLogger:
         segment_distances = [math.sqrt((x_values[i + 1] - x_values[i]) ** 2 + (y_values[i + 1] - y_values[i]) ** 2)
                              for i in range(len(x_values) - 1)]
 
-        total_distance = sum(segment_distances)
+        total_distance = sum(segment_distances)*111319
 
         return total_distance, segment_distances
 
@@ -267,7 +287,6 @@ class DataLogger:
         end_path_ideal_time = self.calculate_ideal_time(self.end_path, non_treatment_speed)
 
         # Print ideal times
-        print("Ideal Travel Times Summary:")
         print(f"Ideal Time Rows: {round(rows_ideal_time, 2)} seconds")
         print(f"Ideal Time Turns: {round(turns_ideal_time, 2)} seconds")
         print(f"Ideal Time Start Path: {round(start_path_ideal_time, 2)} seconds")
@@ -296,7 +315,7 @@ class DataLogger:
         return total_distance
 
     def calculate_ideal_time(self, segment, speed):
-        distance = self.calculate_distance(segment)
+        distance = self.calculate_distance(segment)*111319
         time = distance / speed
         return time
     
@@ -404,7 +423,6 @@ class DataLogger:
         ]
 
         return time_between_assist_and_auto
-    
 
 def main():
     # JSONProcessor
@@ -413,9 +431,7 @@ def main():
     turns = json_processor.extract_turns()
     start_path = json_processor.extract_start_path()
     end_path = json_processor.extract_end_path()
-
-    # Plotting JSONProcessor DataFrames
-    json_processor.plot_dataframes(rows, turns, start_path, end_path)
+    datum = json_processor.extract_datum()
 
     # ROSBagProcessor
     bag_path = '2023-12-06-15-32-37.bag'
@@ -432,10 +448,6 @@ def main():
     if not all(rosbag_processor.messages[topic] for topic in topics):
         print(f"No messages found on one or more topics in the bag.")
         return
-
-    # Example usage of ROSBagProcessor dataframe
-   #print("ROSBag DataFrame:")
-   #print(rosbag_df)
 
     # DataLogger
     data_logger = DataLogger(json_processor, rosbag_processor, rows, turns, start_path, end_path)
@@ -463,7 +475,7 @@ def main():
     data_logger.payload_distance()
     data_logger.payload_runtime()
 
-        # Call the time_between_assists method
+    # Call the time_between_assists method
     time_between_assist_and_auto = data_logger.time_between_assists()
 
     # Check if the result is not empty
@@ -473,6 +485,26 @@ def main():
         print(f"Mean: {round(sum(time_between_assist_and_auto) / assist_length, 2)}")
     else:
         print("No data available for time between assists.")
-        
+
+    plt.figure(figsize=(8, 8))
+
+    # Plot ROSBag positions
+    rosbag_processor.plot_positions()
+
+    # Plot JSONProcessor dataframes
+    json_processor.plot_dataframes(
+        json_processor.coordinates_df,
+        json_processor.turns_df,
+        json_processor.start_path_df,
+        json_processor.end_path_df,
+        json_processor.extract_datum()
+    )
+
+    plt.legend()
+    plt.show()
+
+    print(json_processor.extract_rows())
+    print(rosbag_processor.create_dataframe())
+
 if __name__ == "__main__":
     main()
